@@ -1,0 +1,28 @@
+# ESP-IDF build artifacts
+build/
+sdkconfig
+sdkconfig.old
+*.pyc
+.cache
+
+# Managed components (auto-downloaded by idf.py)
+managed_components/
+dependencies.lock
+
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
+.devcontainer/
+.clangd
+
+# Reference materials (manufacturer datasheets and example code)
+DataSheets/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python virtual environment
+venv/
+.venv/
