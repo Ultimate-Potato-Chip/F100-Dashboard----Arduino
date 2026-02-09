@@ -52,7 +52,7 @@ static const char *TAG = "ST77916_COLOR_TEST";
 #define RGB565_CYAN     0x07FF
 #define RGB565_MAGENTA  0xF81F
 #define RGB565_ORANGE   0xFD20
-#define RGB565_PURPLE   0x801F  // Purple (half R, no G, full B)
+#define RGB565_PURPLE   0xF01F  // Purple (high R, no G, full B) - uses value that survives QSPI rotation
 
 // Global io_handle for draw functions
 static esp_lcd_panel_io_handle_t g_io_handle = NULL;

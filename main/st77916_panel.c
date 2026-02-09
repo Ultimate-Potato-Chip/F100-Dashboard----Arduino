@@ -57,9 +57,10 @@ static inline uint16_t rotate_color_rgb565(uint16_t color)
     uint16_t b = color & 0x1F;          // 5 bits
 
     // Rotate: new_R = old_B, new_G = old_R, new_B = old_G
-    uint16_t new_r = b;                 // B (5 bits) → R (5 bits)
-    uint16_t new_g = r << 1;            // R (5 bits) → G (6 bits)
-    uint16_t new_b = g >> 1;            // G (6 bits) → B (5 bits)
+    // Use proper bit replication for 5↔6 bit conversion
+    uint16_t new_r = b;                       // B (5 bits) → R (5 bits)
+    uint16_t new_g = (r << 1) | (r >> 4);     // R (5 bits) → G (6 bits), replicate MSB to LSB
+    uint16_t new_b = g >> 1;                  // G (6 bits) → B (5 bits)
 
     return (new_r << 11) | (new_g << 5) | new_b;
 }
