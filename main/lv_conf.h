@@ -16,10 +16,10 @@
 #define LV_COLOR_DEPTH 16
 
 /* Swap the 2 bytes of RGB565 color. Useful if the display has a BGR interface */
-#define LV_COLOR_16_SWAP 1  // Enable for BGR byte order
+#define LV_COLOR_16_SWAP 0  // Back to no swap
 
 /* Enable dithering for better color quality */
-#define LV_DITHER_GRADIENT 1
+#define LV_DITHER_GRADIENT 0  // TEST: Disable dithering
 
 /*====================
    MEMORY SETTINGS
@@ -36,11 +36,24 @@
 #define LV_MEM_CUSTOM_REALLOC realloc
 
 /*====================
+   DRAWING SETTINGS
+ *====================*/
+
+/* Enable complex drawing (anti-aliasing, shadows, etc.) */
+#define LV_DRAW_COMPLEX 1
+
+/* Enable anti-aliasing for smooth edges */
+#define LV_ANTIALIAS 1
+
+/* Default VDB (draw buffer) size - more pixels = smoother updates */
+#define LV_VDB_SIZE (360 * 40)  // 40 lines at a time
+
+/*====================
    HAL SETTINGS
  *====================*/
 
 /* Default display refresh period in milliseconds */
-#define LV_DISP_DEF_REFR_PERIOD 20  // 50 FPS
+#define LV_DISP_DEF_REFR_PERIOD 16  // ~60 FPS (was 50)
 
 /* Default input device read period in milliseconds */
 #define LV_INDEV_DEF_READ_PERIOD 30

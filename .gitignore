@@ -16,8 +16,11 @@ dependencies.lock
 .devcontainer/
 .clangd
 
-# Reference materials (manufacturer datasheets and example code)
-DataSheets/
+# Manufacturer source code (large STM32 SDK, not needed for ESP32 project)
+DataSheets/03-*/
+
+# Windows artifact
+nul
 
 # OS files
 .DS_Store
