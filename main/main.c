@@ -52,12 +52,12 @@ static const char *TAG = "ST77916_COLOR_TEST";
 #define RGB565_CYAN     0x07FF
 #define RGB565_MAGENTA  0xF81F
 #define RGB565_ORANGE   0xFD20
-#define RGB565_PURPLE   0x8010
+#define RGB565_PURPLE   0x801F  // Purple (half R, no G, full B)
 
 // Global io_handle for draw functions
 static esp_lcd_panel_io_handle_t g_io_handle = NULL;
 
-// Helper: Fill a rectangle with a solid color (using 0x2C RAMWR directly)
+// Helper: Fill a rectangle with a solid color
 static void fill_rect(int x, int y, int w, int h, uint16_t color)
 {
     size_t buf_size = w * h;
@@ -67,12 +67,11 @@ static void fill_rect(int x, int y, int w, int h, uint16_t color)
         return;
     }
 
-    // Fill buffer with color
     for (size_t i = 0; i < buf_size; i++) {
         buf[i] = color;
     }
 
-    // Draw using standard RAMWR (0x2C) - simpler than RAMWR+RAMWRC sequence
+    // Panel driver handles color rotation internally
     st77916_panel_draw_bitmap(g_io_handle, x, y, x + w, y + h, buf);
 
     heap_caps_free(buf);
@@ -94,6 +93,7 @@ static void fill_screen(uint16_t color)
         buf[i] = color;
     }
 
+    // Panel driver handles color rotation internally
     for (int y = 0; y < LCD_V_RES; y += strip_height) {
         int h = (y + strip_height > LCD_V_RES) ? (LCD_V_RES - y) : strip_height;
         st77916_panel_draw_bitmap(g_io_handle, 0, y, LCD_H_RES, y + h, buf);

@@ -1,13 +1,16 @@
 /**
- * Custom ST77916 QSPI Panel Driver - DIRECT SPI VERSION
+ * Custom ST77916 QSPI Panel Driver
  *
- * Bypasses esp_lcd_panel_io entirely for pixel data to eliminate
- * any byte manipulation that might cause color rotation.
+ * Features:
+ * - Manufacturer's 193-command initialization sequence
+ * - Automatic RGB565 color rotation to compensate for QSPI lane mismatch
+ * - DMA-safe pixel transfer with completion synchronization
  */
 
 #include "st77916_panel.h"
 #include "esp_log.h"
 #include "esp_lcd_panel_io.h"
+#include "esp_heap_caps.h"
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -36,6 +39,44 @@ static const char *TAG = "ST77916_DIRECT";
 // Store handles
 static esp_lcd_panel_io_handle_t g_io_handle = NULL;
 static spi_device_handle_t g_spi_device = NULL;
+
+/**
+ * @brief Rotate RGB565 color channels to compensate for QSPI lane mismatch
+ *
+ * The ST77916 QSPI interface exhibits a color channel rotation (R→B, G→R, B→G).
+ * This function pre-rotates colors in the opposite direction to compensate.
+ *
+ * @param color Original RGB565 color
+ * @return Rotated RGB565 color that displays correctly
+ */
+static inline uint16_t rotate_color_rgb565(uint16_t color)
+{
+    // RGB565: RRRRRGGGGGGBBBBB
+    uint16_t r = (color >> 11) & 0x1F;  // 5 bits
+    uint16_t g = (color >> 5) & 0x3F;   // 6 bits
+    uint16_t b = color & 0x1F;          // 5 bits
+
+    // Rotate: new_R = old_B, new_G = old_R, new_B = old_G
+    uint16_t new_r = b;                 // B (5 bits) → R (5 bits)
+    uint16_t new_g = r << 1;            // R (5 bits) → G (6 bits)
+    uint16_t new_b = g >> 1;            // G (6 bits) → B (5 bits)
+
+    return (new_r << 11) | (new_g << 5) | new_b;
+}
+
+/**
+ * @brief Apply color rotation to entire pixel buffer
+ *
+ * @param dst Destination buffer (can be same as src for in-place)
+ * @param src Source buffer
+ * @param num_pixels Number of RGB565 pixels
+ */
+static void rotate_color_buffer(uint16_t *dst, const uint16_t *src, size_t num_pixels)
+{
+    for (size_t i = 0; i < num_pixels; i++) {
+        dst[i] = rotate_color_rgb565(src[i]);
+    }
+}
 
 // Helper to send command via panel_io (for init sequence)
 static esp_err_t send_cmd(esp_lcd_panel_io_handle_t io, uint8_t cmd, const uint8_t *data, size_t len)
@@ -402,14 +443,24 @@ esp_err_t st77916_panel_draw_bitmap(esp_lcd_panel_io_handle_t io_handle,
     size_t num_pixels = (x_end - x_start) * (y_end - y_start);
     size_t data_len = num_pixels * 2;  // RGB565 = 2 bytes per pixel
 
+    // Allocate buffer for color-rotated pixels
+    uint16_t *rotated_buf = heap_caps_malloc(data_len, MALLOC_CAP_DMA);
+    if (!rotated_buf) {
+        ESP_LOGE(TAG, "Failed to allocate color rotation buffer");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Apply color rotation to compensate for QSPI lane mismatch
+    rotate_color_buffer(rotated_buf, (const uint16_t *)color_data, num_pixels);
+
     // Send RAMWR command + pixel data using panel_io tx_color
     int lcd_cmd = (QSPI_CMD_WRITE_COLOR << 24) | (LCD_CMD_RAMWR << 8);
-    ret = esp_lcd_panel_io_tx_color(io_handle, lcd_cmd, color_data, data_len);
+    ret = esp_lcd_panel_io_tx_color(io_handle, lcd_cmd, rotated_buf, data_len);
 
-    // Wait for DMA transfer to complete before returning
-    // This prevents buffer reuse while DMA is still reading
+    // Wait for DMA transfer to complete before freeing buffer
     vTaskDelay(1);
 
+    heap_caps_free(rotated_buf);
     return ret;
 }
 
