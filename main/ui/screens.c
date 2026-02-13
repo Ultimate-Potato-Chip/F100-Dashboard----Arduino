@@ -7,7 +7,6 @@
 #include "vars.h"
 #include "styles.h"
 #include "ui.h"
-#include "../st77916_colors.h"
 
 #include <string.h>
 
@@ -23,14 +22,14 @@ static lv_meter_scale_t * scale0;
 static bool night_mode_enabled = false;
 
 // Night mode colors - warm amber tint like 80s/90s BMW gauges
-#define NIGHT_BG_COLOR      ST77916_FIX_COLOR(0x0d0805)  // Very dark warm black (subtle amber tint)
-#define NIGHT_TICK_COLOR    ST77916_FIX_COLOR(0xcc8855)  // Warm amber ticks (dimmed)
-#define NIGHT_NEEDLE_COLOR  ST77916_FIX_COLOR(0xaa6030)  // Dimmed warm orange needle
+#define NIGHT_BG_COLOR      0x0d0805  // Very dark warm black (subtle amber tint)
+#define NIGHT_TICK_COLOR    0xcc8855  // Warm amber ticks (dimmed)
+#define NIGHT_NEEDLE_COLOR  0xaa6030  // Dimmed warm orange needle
 
 // Day mode colors
-#define DAY_BG_COLOR        0x000000                     // Black (no fix needed)
-#define DAY_TICK_COLOR      0xffffff                     // White (no fix needed)
-#define DAY_NEEDLE_COLOR    ST77916_FIX_COLOR(0xffb046)  // Amber/orange
+#define DAY_BG_COLOR        0x000000  // Black
+#define DAY_TICK_COLOR      0xffffff  // White
+#define DAY_NEEDLE_COLOR    0xffb046  // Amber/orange
 
 void create_screen_main() {
     lv_obj_t *obj = lv_obj_create(0);

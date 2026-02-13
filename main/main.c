@@ -52,7 +52,14 @@ static const char *TAG = "ST77916_COLOR_TEST";
 #define RGB565_CYAN     0x07FF
 #define RGB565_MAGENTA  0xF81F
 #define RGB565_ORANGE   0xFD20
-#define RGB565_PURPLE   0x801F  // Purple (half R, no G, full B) - testing byte-swap fix
+#define RGB565_PURPLE   0x801F  // Purple (half R, no G, full B)
+
+// Gauge colors to test (from LVGL UI)
+// 0xffb046 (amber) -> RGB565: R=31, G=44, B=8 = 0xFD88
+#define RGB565_AMBER    0xFD88  // The needle color from gauge (0xffb046)
+// Test what the broken ST77916_FIX_COLOR macro produces
+// 0xffb046 -> 0x46ffb0 after rotation -> RGB565: R=8, G=63, B=22 = 0x47F6
+#define RGB565_AMBER_ROTATED 0x47F6  // What ST77916_FIX_COLOR produces (should look wrong)
 
 // Global io_handle for draw functions
 static esp_lcd_panel_io_handle_t g_io_handle = NULL;
@@ -172,7 +179,8 @@ void app_main(void)
     ESP_LOGI(TAG, "  MAGENTA = 0x%04X", RGB565_MAGENTA);
     ESP_LOGI(TAG, "  YELLOW  = 0x%04X", RGB565_YELLOW);
     ESP_LOGI(TAG, "  WHITE   = 0x%04X", RGB565_WHITE);
-    ESP_LOGI(TAG, "  ORANGE  = 0x%04X", RGB565_ORANGE);
+    ESP_LOGI(TAG, "  AMBER   = 0x%04X (gauge needle color)", RGB565_AMBER);
+    ESP_LOGI(TAG, "  AMBER_R = 0x%04X (with broken rotation)", RGB565_AMBER_ROTATED);
     ESP_LOGI(TAG, "");
 
     // Clear screen to black - using standard RAMWR (0x2C)
@@ -199,17 +207,20 @@ void app_main(void)
     fill_rect(start_x + 1*(box_w+gap), start_y + 1*(box_h+gap), box_w, box_h, RGB565_MAGENTA);
     fill_rect(start_x + 2*(box_w+gap), start_y + 1*(box_h+gap), box_w, box_h, RGB565_YELLOW);
 
-    // Row 3: WHITE, ORANGE, PURPLE (more mixed colors)
+    // Row 3: WHITE, AMBER (correct), AMBER_ROTATED (broken fix)
     fill_rect(start_x + 0*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_WHITE);
-    fill_rect(start_x + 1*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_ORANGE);
-    fill_rect(start_x + 2*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_PURPLE);
+    fill_rect(start_x + 1*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_AMBER);
+    fill_rect(start_x + 2*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_AMBER_ROTATED);
 
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "Color grid displayed!");
     ESP_LOGI(TAG, "Expected layout:");
     ESP_LOGI(TAG, "  Row 1: RED | GREEN | BLUE");
     ESP_LOGI(TAG, "  Row 2: CYAN | MAGENTA | YELLOW");
-    ESP_LOGI(TAG, "  Row 3: WHITE | ORANGE | PURPLE");
+    ESP_LOGI(TAG, "  Row 3: WHITE | AMBER (0xFD88) | AMBER_ROTATED (0x47F6)");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "AMBER should be warm orange (needle color)");
+    ESP_LOGI(TAG, "AMBER_ROTATED shows what broken ST77916_FIX_COLOR produces");
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "Please report what colors you actually see!");
 
