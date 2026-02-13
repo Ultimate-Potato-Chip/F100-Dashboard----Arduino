@@ -52,7 +52,7 @@ static const char *TAG = "ST77916_COLOR_TEST";
 #define RGB565_CYAN     0x07FF
 #define RGB565_MAGENTA  0xF81F
 #define RGB565_ORANGE   0xFD20
-#define RGB565_PURPLE   0xF01F  // Purple (high R, no G, full B) - uses value that survives QSPI rotation
+#define RGB565_PURPLE   0x801F  // Purple (half R, no G, full B) - testing byte-swap fix
 
 // Global io_handle for draw functions
 static esp_lcd_panel_io_handle_t g_io_handle = NULL;
@@ -71,7 +71,7 @@ static void fill_rect(int x, int y, int w, int h, uint16_t color)
         buf[i] = color;
     }
 
-    // Panel driver handles color rotation internally
+    // Panel driver handles byte-swap internally
     st77916_panel_draw_bitmap(g_io_handle, x, y, x + w, y + h, buf);
 
     heap_caps_free(buf);
@@ -93,7 +93,7 @@ static void fill_screen(uint16_t color)
         buf[i] = color;
     }
 
-    // Panel driver handles color rotation internally
+    // Panel driver handles byte-swap internally
     for (int y = 0; y < LCD_V_RES; y += strip_height) {
         int h = (y + strip_height > LCD_V_RES) ? (LCD_V_RES - y) : strip_height;
         st77916_panel_draw_bitmap(g_io_handle, 0, y, LCD_H_RES, y + h, buf);

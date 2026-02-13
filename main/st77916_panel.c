@@ -3,7 +3,7 @@
  *
  * Features:
  * - Manufacturer's 193-command initialization sequence
- * - Automatic RGB565 color rotation to compensate for QSPI lane mismatch
+ * - RGB565 byte-swap for correct color display (ESP32 little-endian to display big-endian)
  * - DMA-safe pixel transfer with completion synchronization
  */
 
@@ -41,41 +41,34 @@ static esp_lcd_panel_io_handle_t g_io_handle = NULL;
 static spi_device_handle_t g_spi_device = NULL;
 
 /**
- * @brief Rotate RGB565 color channels to compensate for QSPI lane mismatch
+ * @brief Swap bytes of RGB565 color for correct endianness
  *
- * The ST77916 QSPI interface exhibits a color channel rotation (R→B, G→R, B→G).
- * This function pre-rotates colors in the opposite direction to compensate.
+ * The ESP32 is little-endian but the ST77916 expects big-endian RGB565 data.
+ * This function swaps the high and low bytes to correct the byte order.
  *
- * @param color Original RGB565 color
- * @return Rotated RGB565 color that displays correctly
+ * @param color Original RGB565 color (native endian)
+ * @return Byte-swapped RGB565 color for display
  */
-static inline uint16_t rotate_color_rgb565(uint16_t color)
+static inline uint16_t swap_bytes_rgb565(uint16_t color)
 {
-    // RGB565: RRRRRGGGGGGBBBBB
-    uint16_t r = (color >> 11) & 0x1F;  // 5 bits
-    uint16_t g = (color >> 5) & 0x3F;   // 6 bits
-    uint16_t b = color & 0x1F;          // 5 bits
-
-    // Rotate: new_R = old_B, new_G = old_R, new_B = old_G
-    // Use proper bit replication for 5↔6 bit conversion
-    uint16_t new_r = b;                       // B (5 bits) → R (5 bits)
-    uint16_t new_g = (r << 1) | (r >> 4);     // R (5 bits) → G (6 bits), replicate MSB to LSB
-    uint16_t new_b = g >> 1;                  // G (6 bits) → B (5 bits)
-
-    return (new_r << 11) | (new_g << 5) | new_b;
+    // RGB565 format: RRRRRGGG GGGBBBBB (16-bit)
+    // ESP32 sends little-endian: low byte first, then high byte
+    // ST77916 expects big-endian: high byte first, then low byte
+    // Swap bytes to correct the order
+    return ((color >> 8) & 0xFF) | ((color << 8) & 0xFF00);
 }
 
 /**
- * @brief Apply color rotation to entire pixel buffer
+ * @brief Apply byte-swap to entire pixel buffer
  *
  * @param dst Destination buffer (can be same as src for in-place)
  * @param src Source buffer
  * @param num_pixels Number of RGB565 pixels
  */
-static void rotate_color_buffer(uint16_t *dst, const uint16_t *src, size_t num_pixels)
+static void swap_bytes_buffer(uint16_t *dst, const uint16_t *src, size_t num_pixels)
 {
     for (size_t i = 0; i < num_pixels; i++) {
-        dst[i] = rotate_color_rgb565(src[i]);
+        dst[i] = swap_bytes_rgb565(src[i]);
     }
 }
 
@@ -444,24 +437,24 @@ esp_err_t st77916_panel_draw_bitmap(esp_lcd_panel_io_handle_t io_handle,
     size_t num_pixels = (x_end - x_start) * (y_end - y_start);
     size_t data_len = num_pixels * 2;  // RGB565 = 2 bytes per pixel
 
-    // Allocate buffer for color-rotated pixels
-    uint16_t *rotated_buf = heap_caps_malloc(data_len, MALLOC_CAP_DMA);
-    if (!rotated_buf) {
-        ESP_LOGE(TAG, "Failed to allocate color rotation buffer");
+    // Allocate buffer for byte-swapped pixels
+    uint16_t *swapped_buf = heap_caps_malloc(data_len, MALLOC_CAP_DMA);
+    if (!swapped_buf) {
+        ESP_LOGE(TAG, "Failed to allocate byte-swap buffer");
         return ESP_ERR_NO_MEM;
     }
 
-    // Apply color rotation to compensate for QSPI lane mismatch
-    rotate_color_buffer(rotated_buf, (const uint16_t *)color_data, num_pixels);
+    // Apply byte-swap to convert from ESP32 little-endian to display big-endian
+    swap_bytes_buffer(swapped_buf, (const uint16_t *)color_data, num_pixels);
 
     // Send RAMWR command + pixel data using panel_io tx_color
     int lcd_cmd = (QSPI_CMD_WRITE_COLOR << 24) | (LCD_CMD_RAMWR << 8);
-    ret = esp_lcd_panel_io_tx_color(io_handle, lcd_cmd, rotated_buf, data_len);
+    ret = esp_lcd_panel_io_tx_color(io_handle, lcd_cmd, swapped_buf, data_len);
 
     // Wait for DMA transfer to complete before freeing buffer
     vTaskDelay(1);
 
-    heap_caps_free(rotated_buf);
+    heap_caps_free(swapped_buf);
     return ret;
 }
 
