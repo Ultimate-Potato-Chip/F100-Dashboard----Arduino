@@ -1,3 +1,7 @@
-idf_component_register(SRCS "st77916_init.c" "main.c"
+idf_component_register(SRCS "main.c"
                             "st77916_panel.c"
-                    INCLUDE_DIRS ".")
+                            "ui/ui.c"
+                            "ui/screens.c"
+                            "ui/images.c"
+                            "ui/styles.c"
+                    INCLUDE_DIRS "." "ui")

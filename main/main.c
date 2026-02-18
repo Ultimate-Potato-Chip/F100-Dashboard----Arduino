@@ -1,20 +1,17 @@
 /**
- * ST77916 QSPI Display - Simple Color Test
- * Uses custom st77916_panel driver (bypasses esp_lcd_st77916 component)
+ * ST77916 QSPI Display - LVGL Meter Demo
  *
  * Pin Configuration:
  * CS    -> GPIO5
  * SCLK  -> GPIO6
  * RST   -> GPIO7
- * D0    -> GPIO8  (MOSI)
- * D1    -> GPIO9  (MISO)
+ * D0    -> GPIO8
+ * D1    -> GPIO9
  * D2    -> GPIO10
  * D3    -> GPIO11
  * BL    -> GPIO4
  */
 
-#include <stdio.h>
-#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -22,9 +19,12 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "st77916_panel.h"  // Custom panel driver (bypasses esp_lcd_st77916 component)
+#include "esp_timer.h"
+#include "lvgl.h"
+#include "st77916_panel.h"
+#include "ui/ui.h"
 
-static const char *TAG = "ST77916_COLOR_TEST";
+static const char *TAG = "ST77916_LVGL";
 
 // Pin definitions
 #define LCD_HOST        SPI2_HOST
@@ -37,96 +37,75 @@ static const char *TAG = "ST77916_COLOR_TEST";
 #define PIN_NUM_IO3     11
 #define PIN_NUM_BL      4
 
-// Display specs
+// Display resolution
 #define LCD_H_RES       360
 #define LCD_V_RES       360
 #define LCD_PIXEL_CLK   (20 * 1000 * 1000)
 
-// RGB565 color definitions
-#define RGB565_BLACK    0x0000
-#define RGB565_WHITE    0xFFFF
-#define RGB565_RED      0xF800
-#define RGB565_GREEN    0x07E0
-#define RGB565_BLUE     0x001F
-#define RGB565_YELLOW   0xFFE0
-#define RGB565_CYAN     0x07FF
-#define RGB565_MAGENTA  0xF81F
-#define RGB565_ORANGE   0xFD20
-#define RGB565_PURPLE   0x801F  // Purple (half R, no G, full B)
+// Double-buffered draw buffers (40 lines each)
+#define DRAW_BUF_LINES  40
+static lv_color_t draw_buf1[LCD_H_RES * DRAW_BUF_LINES];
+static lv_color_t draw_buf2[LCD_H_RES * DRAW_BUF_LINES];
 
-// Gauge colors to test (from LVGL UI)
-// 0xffb046 (amber) -> RGB565: R=31, G=44, B=8 = 0xFD88
-#define RGB565_AMBER    0xFD88  // The needle color from gauge (0xffb046)
-// Test what the broken ST77916_FIX_COLOR macro produces
-// 0xffb046 -> 0x46ffb0 after rotation -> RGB565: R=8, G=63, B=22 = 0x47F6
-#define RGB565_AMBER_ROTATED 0x47F6  // What ST77916_FIX_COLOR produces (should look wrong)
-
-// Global io_handle for draw functions
 static esp_lcd_panel_io_handle_t g_io_handle = NULL;
 
-// Helper: Fill a rectangle with a solid color
-static void fill_rect(int x, int y, int w, int h, uint16_t color)
+// LVGL flush callback — sends rendered tile to the display
+static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p)
 {
-    size_t buf_size = w * h;
-    uint16_t *buf = heap_caps_malloc(buf_size * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!buf) {
-        ESP_LOGE(TAG, "Failed to allocate buffer for fill_rect");
-        return;
-    }
-
-    for (size_t i = 0; i < buf_size; i++) {
-        buf[i] = color;
-    }
-
-    // Panel driver handles byte-swap internally
-    st77916_panel_draw_bitmap(g_io_handle, x, y, x + w, y + h, buf);
-
-    heap_caps_free(buf);
+    st77916_panel_draw_bitmap(g_io_handle,
+                              area->x1, area->y1,
+                              area->x2 + 1, area->y2 + 1,
+                              color_p);
+    lv_disp_flush_ready(drv);
 }
 
-// Helper: Fill entire screen with a color
-static void fill_screen(uint16_t color)
+// esp_timer ISR: advance LVGL's internal clock every 1 ms
+static void lvgl_tick_cb(void *arg)
 {
-    // Do it in strips to avoid massive allocation
-    int strip_height = 40;
-    size_t buf_size = LCD_H_RES * strip_height;
-    uint16_t *buf = heap_caps_malloc(buf_size * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!buf) {
-        ESP_LOGE(TAG, "Failed to allocate buffer for fill_screen");
-        return;
-    }
+    lv_tick_inc(1);
+}
 
-    for (size_t i = 0; i < buf_size; i++) {
-        buf[i] = color;
-    }
+// Single task owns all LVGL calls (thread-safety requirement)
+static void lvgl_main_task(void *arg)
+{
+    ui_init();
 
-    // Panel driver handles byte-swap internally
-    for (int y = 0; y < LCD_V_RES; y += strip_height) {
-        int h = (y + strip_height > LCD_V_RES) ? (LCD_V_RES - y) : strip_height;
-        st77916_panel_draw_bitmap(g_io_handle, 0, y, LCD_H_RES, y + h, buf);
-    }
+    int32_t speed = 0;
+    int32_t dir   = 1;
+    uint32_t last_speed_ms = 0;
 
-    heap_caps_free(buf);
+    while (1) {
+        lv_timer_handler();
+
+        // Advance simulated speed at ~30 ms intervals
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        if ((now_ms - last_speed_ms) >= 30) {
+            last_speed_ms = now_ms;
+            ui_set_meter_value(speed);
+            speed += dir;
+            if (speed >= 100) dir = -1;
+            if (speed <= 0)   dir =  1;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "===========================================");
-    ESP_LOGI(TAG, "ST77916 QSPI Color Test - NO LVGL");
-    ESP_LOGI(TAG, "===========================================");
+    ESP_LOGI(TAG, "ST77916 LVGL Meter Demo");
 
-    // Configure backlight GPIO
+    // Backlight GPIO
     gpio_config_t bk_gpio_config = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << PIN_NUM_BL
+        .mode         = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << PIN_NUM_BL,
     };
     ESP_ERROR_CHECK(gpio_config(&bk_gpio_config));
     gpio_set_level(PIN_NUM_BL, 0);
 
     // Initialize QSPI bus
-    ESP_LOGI(TAG, "Initializing QSPI bus...");
     spi_bus_config_t bus_config = {
-        .sclk_io_num = PIN_NUM_SCLK,
+        .sclk_io_num  = PIN_NUM_SCLK,
         .data0_io_num = PIN_NUM_IO0,
         .data1_io_num = PIN_NUM_IO1,
         .data2_io_num = PIN_NUM_IO2,
@@ -140,92 +119,49 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &bus_config, SPI_DMA_CH_AUTO));
 
-    // Create panel IO handle (QSPI mode)
-    ESP_LOGI(TAG, "Creating QSPI panel IO...");
+    // Create QSPI panel IO handle
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_spi_config_t io_config = {
-        .cs_gpio_num = PIN_NUM_CS,
-        .dc_gpio_num = -1,
-        .spi_mode = 3,
-        .pclk_hz = LCD_PIXEL_CLK,
-        .trans_queue_depth = 1,  // Force synchronous transactions to fix line artifacts
-        .lcd_cmd_bits = 32,
-        .lcd_param_bits = 8,
-        .flags = {
-            .quad_mode = true,
-        },
+        .cs_gpio_num       = PIN_NUM_CS,
+        .dc_gpio_num       = -1,
+        .spi_mode          = 3,
+        .pclk_hz           = LCD_PIXEL_CLK,
+        .trans_queue_depth = 1,
+        .lcd_cmd_bits      = 32,
+        .lcd_param_bits    = 8,
+        .flags             = { .quad_mode = true },
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
-
-    // Store io_handle globally for draw functions
     g_io_handle = io_handle;
 
-    // Initialize ST77916 panel using custom driver (bypasses esp_lcd_st77916 component)
-    ESP_LOGI(TAG, "Initializing ST77916 with custom driver...");
+    // Initialize ST77916 panel
     ESP_ERROR_CHECK(st77916_panel_init(io_handle, PIN_NUM_RST));
-
-    // Turn on backlight
     gpio_set_level(PIN_NUM_BL, 1);
-    ESP_LOGI(TAG, "Backlight ON");
 
-    // ========== COLOR TEST ==========
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Starting color test...");
-    ESP_LOGI(TAG, "RGB565 values being sent:");
-    ESP_LOGI(TAG, "  RED     = 0x%04X", RGB565_RED);
-    ESP_LOGI(TAG, "  GREEN   = 0x%04X", RGB565_GREEN);
-    ESP_LOGI(TAG, "  BLUE    = 0x%04X", RGB565_BLUE);
-    ESP_LOGI(TAG, "  CYAN    = 0x%04X", RGB565_CYAN);
-    ESP_LOGI(TAG, "  MAGENTA = 0x%04X", RGB565_MAGENTA);
-    ESP_LOGI(TAG, "  YELLOW  = 0x%04X", RGB565_YELLOW);
-    ESP_LOGI(TAG, "  WHITE   = 0x%04X", RGB565_WHITE);
-    ESP_LOGI(TAG, "  AMBER   = 0x%04X (gauge needle color)", RGB565_AMBER);
-    ESP_LOGI(TAG, "  AMBER_R = 0x%04X (with broken rotation)", RGB565_AMBER_ROTATED);
-    ESP_LOGI(TAG, "");
+    // Initialize LVGL
+    lv_init();
 
-    // Clear screen to black - using standard RAMWR (0x2C)
-    ESP_LOGI(TAG, "Using standard RAMWR (0x2C) command...");
-    fill_screen(RGB565_BLACK);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    // Register display driver with double-buffered draw buffers
+    static lv_disp_draw_buf_t draw_buf_dsc;
+    lv_disp_draw_buf_init(&draw_buf_dsc, draw_buf1, draw_buf2, LCD_H_RES * DRAW_BUF_LINES);
 
-    // Draw color test pattern - 3x3 grid
-    int box_w = 100;
-    int box_h = 100;
-    int gap = 20;
-    int start_x = (LCD_H_RES - (3 * box_w + 2 * gap)) / 2;
-    int start_y = (LCD_V_RES - (3 * box_h + 2 * gap)) / 2;
+    static lv_disp_drv_t disp_drv;
+    lv_disp_drv_init(&disp_drv);
+    disp_drv.hor_res  = LCD_H_RES;
+    disp_drv.ver_res  = LCD_V_RES;
+    disp_drv.flush_cb = lvgl_flush_cb;
+    disp_drv.draw_buf = &draw_buf_dsc;
+    lv_disp_drv_register(&disp_drv);
 
-    ESP_LOGI(TAG, "Drawing color grid...");
+    // Start 1 ms periodic timer to drive lv_tick_inc()
+    const esp_timer_create_args_t tick_timer_args = {
+        .callback = lvgl_tick_cb,
+        .name     = "lvgl_tick",
+    };
+    esp_timer_handle_t tick_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&tick_timer_args, &tick_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 1000));  // 1000 us = 1 ms
 
-    // Row 1: RED, GREEN, BLUE (primary colors)
-    fill_rect(start_x + 0*(box_w+gap), start_y + 0*(box_h+gap), box_w, box_h, RGB565_RED);
-    fill_rect(start_x + 1*(box_w+gap), start_y + 0*(box_h+gap), box_w, box_h, RGB565_GREEN);
-    fill_rect(start_x + 2*(box_w+gap), start_y + 0*(box_h+gap), box_w, box_h, RGB565_BLUE);
-
-    // Row 2: CYAN, MAGENTA, YELLOW (secondary/mixed colors)
-    fill_rect(start_x + 0*(box_w+gap), start_y + 1*(box_h+gap), box_w, box_h, RGB565_CYAN);
-    fill_rect(start_x + 1*(box_w+gap), start_y + 1*(box_h+gap), box_w, box_h, RGB565_MAGENTA);
-    fill_rect(start_x + 2*(box_w+gap), start_y + 1*(box_h+gap), box_w, box_h, RGB565_YELLOW);
-
-    // Row 3: WHITE, AMBER (correct), AMBER_ROTATED (broken fix)
-    fill_rect(start_x + 0*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_WHITE);
-    fill_rect(start_x + 1*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_AMBER);
-    fill_rect(start_x + 2*(box_w+gap), start_y + 2*(box_h+gap), box_w, box_h, RGB565_AMBER_ROTATED);
-
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Color grid displayed!");
-    ESP_LOGI(TAG, "Expected layout:");
-    ESP_LOGI(TAG, "  Row 1: RED | GREEN | BLUE");
-    ESP_LOGI(TAG, "  Row 2: CYAN | MAGENTA | YELLOW");
-    ESP_LOGI(TAG, "  Row 3: WHITE | AMBER (0xFD88) | AMBER_ROTATED (0x47F6)");
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "AMBER should be warm orange (needle color)");
-    ESP_LOGI(TAG, "AMBER_ROTATED shows what broken ST77916_FIX_COLOR produces");
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Please report what colors you actually see!");
-
-    // Stay displaying the test pattern
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    // Launch combined LVGL handler + speed simulation task
+    xTaskCreate(lvgl_main_task, "lvgl_main", 8192, NULL, 5, NULL);
 }

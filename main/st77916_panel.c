@@ -356,25 +356,6 @@ esp_err_t st77916_init_direct_spi(spi_host_device_t host, int cs_gpio, int freq_
     return ESP_OK;
 }
 
-// Send raw bytes via direct SPI in QSPI mode
-static esp_err_t spi_send_qspi_data(const void *data, size_t len)
-{
-    if (!g_spi_device) {
-        ESP_LOGE(TAG, "Direct SPI device not initialized!");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    spi_transaction_ext_t t = {
-        .base = {
-            .flags = SPI_TRANS_MODE_QIO,  // QSPI mode for data
-            .length = len * 8,             // Length in bits
-            .tx_buffer = data,
-        },
-    };
-
-    return spi_device_transmit(g_spi_device, (spi_transaction_t *)&t);
-}
-
 // Send command byte (single-line SPI, then QSPI for params)
 static esp_err_t direct_send_cmd(uint8_t cmd, const uint8_t *data, size_t len)
 {
@@ -389,8 +370,6 @@ static esp_err_t direct_send_cmd(uint8_t cmd, const uint8_t *data, size_t len)
     // Build QSPI command frame: opcode (0x02) + 24-bit address with cmd
     // Format: [opcode 8-bit][addr 24-bit] sent on single line
     // For write command: opcode=0x02, addr = cmd << 8
-    uint32_t cmd_word = (QSPI_CMD_WRITE_CMD << 24) | (cmd << 8);
-
     spi_transaction_ext_t t = {
         .base = {
             .flags = SPI_TRANS_VARIABLE_CMD | SPI_TRANS_VARIABLE_ADDR,
